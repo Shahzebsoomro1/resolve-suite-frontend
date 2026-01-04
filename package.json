@@ -24,6 +24,6 @@
     "@types/cors": "^2.8.17"
   },
   "engines": {
-    "node": "18.x"
+    "node": "20.x"
   }
 }
