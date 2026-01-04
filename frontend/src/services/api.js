@@ -1,35 +1,109 @@
 import axios from 'axios';
+
 const OPENCAGE_API_URL = 'https://api.opencagedata.com/geocode/v1/json';
+
+// Determine the correct API base URL
+const getApiBaseUrl = () => {
+  // Check if we're in production (deployed on Vercel)
+  if (process.env.NODE_ENV === 'production') {
+    // In production, use relative path (same domain)
+    return '/api';
+  }
+  
+  // In development, use environment variable or default to localhost
+  return process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
+
+console.log('🌐 API Configuration:', {
+  environment: process.env.NODE_ENV,
+  baseURL: API_BASE_URL
+});
 
 // Create an instance of Axios
 const API = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
-  withCredentials: true, // Keep this true if you need to send cookies
+  baseURL: API_BASE_URL,
+  withCredentials: true,
+  timeout: 30000, // 30 seconds timeout
+  headers: {
+    'Content-Type': 'application/json',
+  }
 });
 
 // Add a request interceptor to include the JWT token in requests
-API.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-  }
-  return config;
-}, (error) => {
-  return Promise.reject(error);
-});
-
-// Add a response interceptor for global error handling
-API.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    console.error('API Error:', error.response?.data || error.message);
-    if (error.response?.status === 401) {
-      handleUnauthorized();
+API.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = token.startsWith('Bearer ') 
+        ? token 
+        : `Bearer ${token}`;
     }
+    
+    // Log request in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('📤 API Request:', {
+        method: config.method?.toUpperCase(),
+        url: config.url,
+        fullURL: `${config.baseURL}${config.url}`
+      });
+    }
+    
+    return config;
+  },
+  (error) => {
+    console.error('❌ Request Error:', error);
     return Promise.reject(error);
   }
 );
 
+// Add a response interceptor for global error handling
+API.interceptors.response.use(
+  (response) => {
+    // Log response in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('✅ API Response:', {
+        status: response.status,
+        url: response.config.url
+      });
+    }
+    return response;
+  },
+  (error) => {
+    console.error('❌ API Error:', {
+      status: error.response?.status,
+      message: error.response?.data?.msg || error.message,
+      url: error.config?.url
+    });
+    
+    // Handle 401 Unauthorized
+    if (error.response?.status === 401) {
+      handleUnauthorized();
+    }
+    
+    // Handle network errors
+    if (!error.response) {
+      console.error('🔌 Network Error - Cannot reach server');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('💡 Tip: Make sure your backend server is running on port 5000');
+      }
+    }
+    
+    return Promise.reject(error);
+  }
+);
+
+// Handle unauthorized access
+export const handleUnauthorized = () => {
+  console.log('🚫 Unauthorized access detected. Redirecting to login.');
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  delete API.defaults.headers.common['Authorization'];
+  window.location.href = '/login';
+};
+
+// ========== ORGANIZATION APIs ==========
 export const getOrganizations = async () => {
   try {
     const response = await API.get('/organizations');
@@ -40,89 +114,6 @@ export const getOrganizations = async () => {
   }
 };
 
-// Login user
-export const loginUser = async (email, password, organizationId) => {
-  try {
-    const response = await API.post('/auth/login', { email, password, organizationId });
-    const { token, role, userId, firstName, lastName, departmentId } = response.data;
-    
-    // Store token in localStorage
-    localStorage.setItem('token', `Bearer ${token}`);
-    
-    // Return user data for context
-    return {
-      token,
-      role,
-      email,
-      userId,
-      firstName,
-      lastName,
-      organizationId,
-      departmentId,
-      isAuthenticated: true
-    };
-  } catch (error) {
-    console.error('Login failed:', error.response?.data || error.message);
-    throw error;
-  }
-};
-
-// Handle unauthorized access
-export const handleUnauthorized = () => {
-  console.log('Unauthorized access detected. Redirecting to login.');
-  localStorage.removeItem('token');
-  window.location.href = '/login';
-};
-
-// Add a new user
-export const addUser = async (userData) => {
-  try {
-    const response = await API.post('/users/add', userData);
-    console.log('User added successfully:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('Error adding user:', error.response?.data || error.message);
-    throw error;
-  }
-};
-
-// Fetch all users
-export const fetchUsers = async () => {
-  try {
-    const response = await API.get('/users');
-    console.log('Users fetched successfully:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('Error fetching users:', error.response?.data || error.message);
-    throw error;
-  }
-};
-
-// Delete a user
-export const deleteUser = async (userId) => {
-  try {
-    const response = await API.delete(`/users/${userId}`);
-    console.log('User deleted successfully:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('Error deleting user:', error.response?.data || error.message);
-    throw error;
-  }
-};
-
-// Register a SuperAdmin
-export const registerSuperAdmin = async (superAdminData) => {
-  try {
-    const response = await API.post('/auth/register-superadmin', superAdminData);
-    console.log('SuperAdmin registered successfully:', response.data);
-    return response.data;
-  } catch (error) {
-    console.error('Error registering SuperAdmin:', error.response?.data || error.message);
-    throw error;
-  }
-};
-
-// Register an Organization
 export const registerOrganization = async (organizationData) => {
   try {
     const response = await API.post('/organizations/register', organizationData);
@@ -142,21 +133,51 @@ export const registerOrganization = async (organizationData) => {
   }
 };
 
-// Fetch address suggestions
-export const fetchAddressSuggestions = async (input) => {
+export const fetchOrganizationById = async (id) => {
   try {
-    const response = await axios.get(OPENCAGE_API_URL, {
-      params: { 
-        q: input, 
-        key: process.env.REACT_APP_OPENCAGE_API_KEY, 
-        limit: 5 
-      },
-    });
-    console.log('Address suggestions fetched successfully:', response.data.results);
-    return response.data.results;
+    const response = await API.get(`/organizations/${id}`);
+    return response.data;
   } catch (error) {
-    console.error('Error fetching address suggestions:', error.response?.data || error.message);
-    throw new Error('Failed to fetch address suggestions. Please try again.');
+    console.error('Error fetching organization:', error);
+    throw error;
+  }
+};
+
+export const checkOrganizationName = async (name) => {
+  try {
+    const response = await API.get(`/organizations/check-name/${encodeURIComponent(name)}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error checking organization name:', error);
+    throw error;
+  }
+};
+
+// ========== AUTH APIs ==========
+export const loginUser = async (email, password, organizationId) => {
+  try {
+    const response = await API.post('/auth/login', { email, password, organizationId });
+    const { token, role, userId, firstName, lastName, departmentId } = response.data;
+    
+    // Store token in localStorage
+    const fullToken = `Bearer ${token}`;
+    localStorage.setItem('token', fullToken);
+    
+    // Return user data for context
+    return {
+      token: fullToken,
+      role,
+      email,
+      userId,
+      firstName,
+      lastName,
+      organizationId,
+      departmentId,
+      isAuthenticated: true
+    };
+  } catch (error) {
+    console.error('Login failed:', error.response?.data || error.message);
+    throw error;
   }
 };
 
@@ -188,6 +209,17 @@ export const signupUser = async (userData) => {
   }
 };
 
+export const registerSuperAdmin = async (superAdminData) => {
+  try {
+    const response = await API.post('/auth/register-superadmin', superAdminData);
+    console.log('SuperAdmin registered successfully:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Error registering SuperAdmin:', error.response?.data || error.message);
+    throw error;
+  }
+};
+
 export const requestPasswordReset = async (email) => {
   try {
     const response = await API.post('/auth/forgot-password', { email });
@@ -215,27 +247,50 @@ export const resetPassword = async (email, password) => {
   }
 };
 
-export const fetchOrganizationById = async (id) => {
+// ========== USER APIs ==========
+export const addUser = async (userData) => {
   try {
-    const response = await API.get(`/organizations/${id}`);
+    const response = await API.post('/users/add', userData);
+    console.log('User added successfully:', response.data);
     return response.data;
   } catch (error) {
-    console.error('Error fetching organization:', error);
+    console.error('Error adding user:', error.response?.data || error.message);
     throw error;
   }
 };
 
-export const checkOrganizationName = async (name) => {
+export const fetchUsers = async () => {
   try {
-    const response = await API.get(`/organizations/check-name/${encodeURIComponent(name)}`);
+    const response = await API.get('/users');
+    console.log('Users fetched successfully:', response.data);
     return response.data;
   } catch (error) {
-    console.error('Error checking organization name:', error);
+    console.error('Error fetching users:', error.response?.data || error.message);
     throw error;
   }
 };
 
-// Department Management APIs
+export const deleteUser = async (userId) => {
+  try {
+    const response = await API.delete(`/users/${userId}`);
+    console.log('User deleted successfully:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Error deleting user:', error.response?.data || error.message);
+    throw error;
+  }
+};
+
+export const fetchDepartmentEligibleUsers = async () => {
+  try {
+    const response = await API.get('/users/department-eligible');
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || error.message;
+  }
+};
+
+// ========== DEPARTMENT APIs ==========
 export const createDepartment = async (departmentData) => {
   try {
     const response = await API.post('/departments', departmentData);
@@ -312,19 +367,9 @@ export const removeUserFromDepartment = async (departmentId, userId) => {
   }
 };
 
-export const fetchDepartmentEligibleUsers = async () => {
-  try {
-    const response = await API.get('/users/department-eligible');
-    return response.data;
-  } catch (error) {
-    throw error.response?.data || error.message;
-  }
-};
-
-// Complaint APIs
+// ========== COMPLAINT APIs ==========
 export const createComplaint = async (complaintData) => {
   try {
-    // Set proper headers based on data type
     const config = {
       headers: {
         'Content-Type': complaintData instanceof FormData 
@@ -409,6 +454,7 @@ export const assignComplaint = async (id, assignmentData) => {
   }
 };
 
+// ========== COMPLAINT TYPE APIs ==========
 export const createComplaintType = async (data) => {
   try {
     const response = await API.post('/complaints/types', data);
@@ -445,7 +491,7 @@ export const deleteComplaintType = async (id) => {
   }
 };
 
-// Create a new workflow
+// ========== WORKFLOW APIs ==========
 export const createWorkflow = async (workflowData) => {
   try {
     const response = await API.post('/workflows', workflowData);
@@ -455,7 +501,6 @@ export const createWorkflow = async (workflowData) => {
   }
 };
 
-// Get all workflows
 export const getWorkflows = async () => {
   try {
     const response = await API.get('/workflows');
@@ -465,7 +510,6 @@ export const getWorkflows = async () => {
   }
 };
 
-// Get workflow by ID
 export const getWorkflowById = async (id) => {
   try {
     const response = await API.get(`/workflows/${id}`);
@@ -475,7 +519,6 @@ export const getWorkflowById = async (id) => {
   }
 };
 
-// Get workflows by department
 export const getWorkflowsByDepartment = async (departmentId) => {
   try {
     const response = await API.get(`/workflows/department/${departmentId}`);
@@ -485,7 +528,6 @@ export const getWorkflowsByDepartment = async (departmentId) => {
   }
 };
 
-// Get workflows by complaint type
 export const getWorkflowsByComplaintType = async (complaintTypeId) => {
   try {
     const response = await API.get(`/workflows/complaint-type/${complaintTypeId}`);
@@ -495,20 +537,18 @@ export const getWorkflowsByComplaintType = async (complaintTypeId) => {
   }
 };
 
-// Get workflow for a specific complaint
 export const getWorkflowForComplaint = async (complaintId) => {
   try {
     const response = await API.get(`/workflows/complaint/${complaintId}`);
     return response.data;
   } catch (error) {
     if (error.response?.status === 404) {
-      return null; // Return null for complaints without workflows
+      return null;
     }
     throw error.response?.data || error.message;
   }
 };
 
-// Update workflow stage for a complaint
 export const updateWorkflowStage = async (complaintId, stageData) => {
   try {
     const response = await API.put(`/workflows/complaint/${complaintId}/stage`, stageData);
@@ -518,7 +558,6 @@ export const updateWorkflowStage = async (complaintId, stageData) => {
   }
 };
 
-// Update a workflow
 export const updateWorkflow = async (id, workflowData) => {
   try {
     const response = await API.put(`/workflows/${id}`, workflowData);
@@ -528,7 +567,6 @@ export const updateWorkflow = async (id, workflowData) => {
   }
 };
 
-// Delete a workflow
 export const deleteWorkflow = async (id) => {
   try {
     const response = await API.delete(`/workflows/${id}`);
@@ -538,7 +576,55 @@ export const deleteWorkflow = async (id) => {
   }
 };
 
-// Notification API functions
+export const getWorkflowTemplates = async () => {
+  try {
+    const response = await API.get('/workflows/templates');
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || error.message;
+  }
+};
+
+export const getWorkflowTemplatesByCategory = async (category) => {
+  try {
+    const response = await API.get(`/workflows/templates/category/${category}`);
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || error.message;
+  }
+};
+
+export const getWorkflowTemplateById = async (id) => {
+  try {
+    const response = await API.get(`/workflows/templates/${id}`);
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || error.message;
+  }
+};
+
+export const createWorkflowFromTemplate = async (templateId, customizations) => {
+  try {
+    const response = await API.post('/workflows/from-template', {
+      templateId,
+      ...customizations
+    });
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || error.message;
+  }
+};
+
+export const importWorkflowTemplates = async (data) => {
+  try {
+    const response = await API.post('/workflows/import-templates', data);
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || error.message;
+  }
+};
+
+// ========== NOTIFICATION APIs ==========
 export const getNotifications = async (params = {}) => {
   try {
     const response = await API.get('/notifications', { params });
@@ -589,59 +675,7 @@ export const deleteNotification = async (notificationId) => {
   }
 };
 
-// Get all workflow templates
-export const getWorkflowTemplates = async () => {
-  try {
-    const response = await API.get('/workflows/templates');
-    return response.data;
-  } catch (error) {
-    throw error.response?.data || error.message;
-  }
-};
-
-// Get workflow templates by category
-export const getWorkflowTemplatesByCategory = async (category) => {
-  try {
-    const response = await API.get(`/workflows/templates/category/${category}`);
-    return response.data;
-  } catch (error) {
-    throw error.response?.data || error.message;
-  }
-};
-
-// Get workflow template by ID
-export const getWorkflowTemplateById = async (id) => {
-  try {
-    const response = await API.get(`/workflows/templates/${id}`);
-    return response.data;
-  } catch (error) {
-    throw error.response?.data || error.message;
-  }
-};
-
-// Create workflow from template
-export const createWorkflowFromTemplate = async (templateId, customizations) => {
-  try {
-    const response = await API.post('/workflows/from-template', {
-      templateId,
-      ...customizations
-    });
-    return response.data;
-  } catch (error) {
-    throw error.response?.data || error.message;
-  }
-};
-
-export const importWorkflowTemplates = async (data) => {
-  try {
-    const response = await API.post('/workflows/import-templates', data);
-    return response.data;
-  } catch (error) {
-    throw error.response?.data || error.message;
-  }
-};
-
-// Submit feedback for a complaint
+// ========== FEEDBACK APIs ==========
 export const submitFeedback = async (feedbackData) => {
   try {
     const response = await API.post('/feedback', feedbackData);
@@ -653,7 +687,6 @@ export const submitFeedback = async (feedbackData) => {
   }
 };
 
-// Get feedback for a specific complaint
 export const getFeedbackByComplaint = async (complaintId) => {
   try {
     const response = await API.get(`/feedback/complaint/${complaintId}`);
@@ -661,14 +694,13 @@ export const getFeedbackByComplaint = async (complaintId) => {
     return response.data;
   } catch (error) {
     if (error.response?.status === 404) {
-      return null; // No feedback found
+      return null;
     }
     console.error('Error fetching feedback:', error.response?.data || error.message);
     throw error;
   }
 };
 
-// Check if user can provide feedback for a complaint
 export const canProvideFeedback = async (complaintId) => {
   try {
     const response = await API.get(`/feedback/can-provide/${complaintId}`);
@@ -680,7 +712,6 @@ export const canProvideFeedback = async (complaintId) => {
   }
 };
 
-// Get all feedback for organization (Admin only)
 export const getAllFeedback = async (params = {}) => {
   try {
     const queryParams = new URLSearchParams();
@@ -699,7 +730,6 @@ export const getAllFeedback = async (params = {}) => {
   }
 };
 
-// Get feedback statistics (Admin only)
 export const getFeedbackStats = async () => {
   try {
     const response = await API.get('/feedback/stats');
@@ -722,7 +752,6 @@ export const getFeedbackStatsByDepartment = async (departmentId) => {
   }
 };
 
-// Get all feedback for a specific department
 export const getFeedbackByDepartment = async (departmentId, params = {}) => {
   try {
     const queryParams = new URLSearchParams();
@@ -737,6 +766,24 @@ export const getFeedbackByDepartment = async (departmentId, params = {}) => {
   } catch (error) {
     console.error('Error fetching department feedback:', error.response?.data || error.message);
     throw error;
+  }
+};
+
+// ========== ADDRESS APIs ==========
+export const fetchAddressSuggestions = async (input) => {
+  try {
+    const response = await axios.get(OPENCAGE_API_URL, {
+      params: { 
+        q: input, 
+        key: process.env.REACT_APP_OPENCAGE_API_KEY, 
+        limit: 5 
+      },
+    });
+    console.log('Address suggestions fetched successfully:', response.data.results);
+    return response.data.results;
+  } catch (error) {
+    console.error('Error fetching address suggestions:', error.response?.data || error.message);
+    throw new Error('Failed to fetch address suggestions. Please try again.');
   }
 };
 
